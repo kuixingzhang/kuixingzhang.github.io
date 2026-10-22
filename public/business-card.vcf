@@ -1,0 +1,15 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Zhang;Kuixing;;;
+FN:Kuixing Zhang, MD, PhD
+ORG:Raphael Clinic Corp.
+TITLE:Medical Director and Pathologist
+TEL;TYPE=WORK,VOICE:559-450-3686
+TEL;TYPE=WORK,FAX:559-450-2035
+EMAIL;TYPE=WORK:kuixing.zhang@samc.com
+ADR;TYPE=WORK:;;1303 E Herndon Ave;Fresno;CA;93720;USA
+URL:https://drzhangpathology.com
+NOTE:NPI: 1982087110\nCalifornia Medical License: A151586
+X-NPI:1982087110
+X-CALIFORNIA-MEDICAL-LICENSE:A151586
+END:VCARD

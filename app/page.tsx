@@ -1,58 +1,89 @@
-import { DeployButton } from "@/components/deploy-button";
-import { EnvVarWarning } from "@/components/env-var-warning";
-import { AuthButton } from "@/components/auth-button";
-import { Hero } from "@/components/hero";
-import { ThemeSwitcher } from "@/components/theme-switcher";
-import { ConnectSupabaseSteps } from "@/components/tutorial/connect-supabase-steps";
-import { SignUpUserSteps } from "@/components/tutorial/sign-up-user-steps";
-import { hasEnvVars } from "@/lib/utils";
-import Link from "next/link";
-import { Suspense } from "react";
+import SiteHeader from "@/components/SiteHeader";
+const features = [
+  {
+    label: "1. Practice",
+    title: "Professional Practice",
+    description:
+      "View the current professional schedule and access archived schedule records.",
+    href: "/professional-practice/schedule",
+  },
+  {
+    label: "2. Education",
+    title: "Teaching & Education",
+    description:
+      "Pathology education focused on diagnostic reasoning, pattern recognition, and practical experience.",
+    href: "/teaching",
+  },
+  {
+    label: "3. Contact",
+    title: "Professional Contact",
+    description:
+      "Download my professional contact information and add it directly to your contacts.",
+    href: "/business-card.vcf",
+  },
+  {
+    label: "4. Documents",
+    title: "Document Management",
+    description:
+      "A private library for important professional documents, organized for convenient retrieval and submission.",
+    href: "/documents",
+  },
+];
 
-export default function Home() {
+export default function HomePage() {
   return (
-    <main className="min-h-screen flex flex-col items-center">
-      <div className="flex-1 w-full flex flex-col gap-20 items-center">
-        <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
-          <div className="w-full max-w-5xl flex justify-between items-center p-3 px-5 text-sm">
-            <div className="flex gap-5 items-center font-semibold">
-              <Link href={"/"}>Next.js Supabase Starter</Link>
-              <div className="flex items-center gap-2">
-                <DeployButton />
-              </div>
-            </div>
-            {!hasEnvVars ? (
-              <EnvVarWarning />
-            ) : (
-              <Suspense>
-                <AuthButton />
-              </Suspense>
-            )}
-          </div>
-        </nav>
-        <div className="flex-1 flex flex-col gap-20 max-w-5xl p-5">
-          <Hero />
-          <main className="flex-1 flex flex-col gap-6 px-4">
-            <h2 className="font-medium text-xl mb-4">Next steps</h2>
-            {hasEnvVars ? <SignUpUserSteps /> : <ConnectSupabaseSteps />}
-          </main>
-        </div>
+    <>
+      <SiteHeader />
 
-        <footer className="w-full flex items-center justify-center border-t mx-auto text-center text-xs gap-8 py-16">
-          <p>
-            Powered by{" "}
-            <a
-              href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
-              target="_blank"
-              className="font-bold hover:underline"
-              rel="noreferrer"
-            >
-              Supabase
-            </a>
+      <main>
+        <section className="hero">
+          <div className="site-container">
+            <p className="eyebrow">Anatomic & Clinical Pathology</p>
+
+            <h1>
+              Diagnostic Excellence.
+              <br />
+              Clinical Insight.
+            </h1>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="site-container">
+            <h2 className="section-heading">Professional Resources</h2>
+
+            <p className="section-description">
+              Practical tools and resources supporting professional practice,
+              education, and continuous improvement in pathology.
+            </p>
+
+            <div className="feature-grid">
+              {features.map((feature) => (
+                <a
+                  className="feature-card"
+                  href={feature.href}
+                  key={feature.label}
+                >
+                  <p className="card-label">{feature.label}</p>
+
+                  <h3>{feature.title}</h3>
+
+                  <p>{feature.description}</p>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      </main>
+      <footer className="site-footer">
+        <div className="site-container footer-inner">
+          <p className="footer-copy">
+            © 2026 Kuixing Zhang, MD, PhD.
+            <br />
+            Dr. Zhang Pathology · Diagnostic Excellence
           </p>
-          <ThemeSwitcher />
-        </footer>
-      </div>
-    </main>
+        </div>
+      </footer>
+    </>
   );
 }

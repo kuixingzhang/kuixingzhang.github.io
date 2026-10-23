@@ -80,7 +80,7 @@ export default function SiteHeader() {
           </a>
 
           <a
-            href="https://drzhangpathology.com"
+            href="https://www.pathologygps.com"
             target="_blank"
             rel="noreferrer"
           >

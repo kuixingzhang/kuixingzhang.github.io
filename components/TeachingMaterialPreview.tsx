@@ -26,6 +26,11 @@ export default function TeachingMaterialPreview({
   const [zoom, setZoom] = useState(100);
   const [fileUrl, setFileUrl] = useState("");
   const [pptxFile, setPptxFile] = useState<Blob | null>(null);
+  const [excelSheets, setExcelSheets] = useState<string[]>([]);
+  const [excelRows, setExcelRows] = useState<
+    Record<string, (string | number | boolean)[][]>
+  >({});
+  const [activeExcelSheet, setActiveExcelSheet] = useState("");
   const pptViewerContainerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -126,9 +131,37 @@ export default function TeachingMaterialPreview({
           });
         } else if (extension === "pptx") {
           setPptxFile(blob);
+        } else if (extension === "xlsx") {
+          // Parse the workbook in the browser and render each worksheet as a table.
+          const XLSX = await import("xlsx");
+          const arrayBuffer = await blob.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, {
+            type: "array",
+            cellDates: true,
+          });
+
+          const names: string[] = workbook.SheetNames;
+          const rowsBySheet: Record<string, (string | number | boolean)[][]> =
+            {};
+
+          for (const sheetName of names) {
+            const worksheet = workbook.Sheets[sheetName];
+            rowsBySheet[sheetName] = XLSX.utils.sheet_to_json(worksheet, {
+              header: 1,
+              defval: "",
+              raw: false,
+              blankrows: true,
+            }) as (string | number | boolean)[][];
+          }
+
+          if (!cancelled) {
+            setExcelSheets(names);
+            setExcelRows(rowsBySheet);
+            setActiveExcelSheet(names[0] ?? "");
+          }
         } else {
           throw new Error(
-            "Preview is supported for PDF, DOCX, and PPTX files.",
+            "Preview is supported for PDF, DOCX, PPTX, and XLSX files.",
           );
         }
 
@@ -318,6 +351,13 @@ export default function TeachingMaterialPreview({
       return;
     }
 
+    if (extension === "xlsx") {
+      setError(
+        "For reliable Excel printing, download the original workbook and print it from Excel. This preserves worksheet layout, page setup, and print areas.",
+      );
+      return;
+    }
+
     window.print();
   }
 
@@ -440,6 +480,57 @@ export default function TeachingMaterialPreview({
             title={fileName}
             className="h-full min-h-[70vh] w-full rounded border bg-white"
           />
+        )}
+
+        {extension === "xlsx" && excelSheets.length > 0 && (
+          <section className="mx-auto w-full max-w-full overflow-hidden rounded-lg border bg-white shadow-sm">
+            <div className="flex flex-wrap gap-2 border-b bg-gray-50 p-3">
+              {excelSheets.map((sheetName) => (
+                <button
+                  key={sheetName}
+                  type="button"
+                  onClick={() => setActiveExcelSheet(sheetName)}
+                  className={`rounded-md border px-3 py-2 text-sm ${
+                    activeExcelSheet === sheetName
+                      ? "border-blue-700 bg-blue-700 text-white"
+                      : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  {sheetName}
+                </button>
+              ))}
+            </div>
+
+            <div className="max-h-[70vh] overflow-auto">
+              <div style={{ zoom: `${zoom}%` }} className="min-w-max">
+                <table className="border-collapse text-sm">
+                  <tbody>
+                    {(excelRows[activeExcelSheet] ?? []).map(
+                      (row, rowIndex) => (
+                        <tr key={`${activeExcelSheet}-${rowIndex}`}>
+                          {row.map((cell, columnIndex) => (
+                            <td
+                              key={`${rowIndex}-${columnIndex}`}
+                              className="min-w-20 max-w-[420px] whitespace-pre-wrap break-words border border-gray-300 px-3 py-2 align-top"
+                            >
+                              {cell === null || cell === undefined
+                                ? ""
+                                : String(cell)}
+                            </td>
+                          ))}
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p className="border-t bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              Excel preview shows worksheet cell values. For exact Excel
+              formatting, formulas, charts, and print layout, download the
+              original workbook and open it in Excel.
+            </p>
+          </section>
         )}
 
         {extension === "docx" && (

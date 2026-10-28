@@ -25,8 +25,9 @@ const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const XLSX_MIME =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const PDF_MIME = "application/pdf";
 
-type ScheduleExtension = "docx" | "xlsx";
+type ScheduleExtension = "docx" | "xlsx" | "pdf";
 
 type ScheduleFile = {
   name: string;
@@ -46,12 +47,15 @@ function getScheduleExtension(fileName: string): ScheduleExtension | null {
 
   if (name.endsWith(".docx")) return "docx";
   if (name.endsWith(".xlsx")) return "xlsx";
+  if (name.endsWith(".pdf")) return "pdf";
 
   return null;
 }
 
 function getScheduleMime(extension: ScheduleExtension) {
-  return extension === "xlsx" ? XLSX_MIME : DOCX_MIME;
+  if (extension === "xlsx") return XLSX_MIME;
+  if (extension === "pdf") return PDF_MIME;
+  return DOCX_MIME;
 }
 
 function getCurrentPath(extension: ScheduleExtension) {
@@ -316,7 +320,7 @@ export default function SchedulePage() {
 
   async function uploadSchedule() {
     if (!selectedFile) {
-      setError("Please select a Word document or Excel workbook first.");
+      setError("Please select a Word document, Excel workbook, or PDF first.");
       return;
     }
 
@@ -324,7 +328,7 @@ export default function SchedulePage() {
 
     if (!newExtension) {
       setError(
-        "Only .docx Word documents and .xlsx Excel workbooks are supported.",
+        "Only .docx Word documents, .xlsx Excel workbooks, and .pdf files are supported.",
       );
       return;
     }
@@ -675,7 +679,7 @@ export default function SchedulePage() {
                   <div>
                     <h2 className="text-xl font-semibold">Current Schedule</h2>
                     <p className="mt-1 text-sm text-gray-500">
-                      Current official Word document or Excel workbook
+                      Current official Word document, Excel workbook, or PDF
                     </p>
                     {currentSchedule?.updatedAt && (
                       <p className="mt-2 text-xs text-gray-500">
@@ -763,15 +767,17 @@ export default function SchedulePage() {
               <div className="mt-7 border-t pt-6">
                 <h3 className="font-semibold">Upload New Schedule</h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  Upload a .docx Word document or .xlsx Excel workbook. The
-                  current version will be archived before it is replaced.
+                  Upload a .docx Word document, .xlsx Excel workbook, or .pdf
+                  file. For best layout fidelity, export Excel schedules to PDF
+                  in Excel before uploading. The current version will be
+                  archived before it is replaced.
                 </p>
 
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
                   <input
                     id="schedule-upload"
                     type="file"
-                    accept=".docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    accept=".docx,.xlsx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf"
                     onChange={(event) =>
                       setSelectedFile(event.target.files?.[0] ?? null)
                     }
@@ -813,7 +819,7 @@ export default function SchedulePage() {
                   <div>
                     <h2 className="text-xl font-semibold">Schedule Archive</h2>
                     <p className="mt-1 text-sm text-gray-500">
-                      Previous Word and Excel schedule versions
+                      Previous Word, Excel, and PDF schedule versions
                     </p>
                   </div>
                 </div>

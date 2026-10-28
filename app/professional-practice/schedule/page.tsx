@@ -7,20 +7,26 @@ import {
   CalendarDays,
   Download,
   FileText,
+  FileSpreadsheet,
   LoaderCircle,
   RefreshCw,
   Upload,
 } from "lucide-react";
+
 import { createClient } from "@/lib/supabase/client";
 import TeachingMaterialPreview from "@/components/TeachingMaterialPreview";
 
 const BUCKET = "teaching-private";
-const CURRENT_PATH = "schedule/current-schedule.docx";
 const ARCHIVE_FOLDER = "schedule/archive";
+const SCHEDULE_FOLDER = "schedule";
 const SIGNED_URL_SECONDS = 3600;
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+type ScheduleExtension = "docx" | "xlsx";
 
 type ScheduleFile = {
   name: string;
@@ -28,11 +34,34 @@ type ScheduleFile = {
   createdAt: string | null;
 };
 
+type CurrentSchedule = {
+  name: string;
+  path: string;
+  updatedAt: string | null;
+  extension: ScheduleExtension;
+};
+
+function getScheduleExtension(fileName: string): ScheduleExtension | null {
+  const name = fileName.toLowerCase();
+
+  if (name.endsWith(".docx")) return "docx";
+  if (name.endsWith(".xlsx")) return "xlsx";
+
+  return null;
+}
+
+function getScheduleMime(extension: ScheduleExtension) {
+  return extension === "xlsx" ? XLSX_MIME : DOCX_MIME;
+}
+
+function getCurrentPath(extension: ScheduleExtension) {
+  return `${SCHEDULE_FOLDER}/current-schedule.${extension}`;
+}
+
 function formatDate(value: string | null) {
   if (!value) return "Date unavailable";
 
   const date = new Date(value);
-
   if (Number.isNaN(date.getTime())) return "Date unavailable";
 
   return date.toLocaleString("en-US", {
@@ -44,13 +73,17 @@ function formatDate(value: string | null) {
   });
 }
 
-function makeArchivePath() {
+function makeArchivePath(extension: ScheduleExtension) {
   const timestamp = new Date()
     .toISOString()
     .replace(/[-:]/g, "")
     .replace(/\.\d{3}Z$/, "Z");
 
-  return `${ARCHIVE_FOLDER}/${timestamp}-schedule.docx`;
+  return `${ARCHIVE_FOLDER}/${timestamp}-schedule.${extension}`;
+}
+
+function isScheduleFileName(fileName: string) {
+  return getScheduleExtension(fileName) !== null;
 }
 
 export default function SchedulePage() {
@@ -58,21 +91,25 @@ export default function SchedulePage() {
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [currentExists, setCurrentExists] = useState(false);
-  const [currentUpdatedAt, setCurrentUpdatedAt] = useState<string | null>(null);
+  const [currentSchedule, setCurrentSchedule] =
+    useState<CurrentSchedule | null>(null);
   const [archives, setArchives] = useState<ScheduleFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [currentConflict, setCurrentConflict] = useState(false);
   const [preview, setPreview] = useState<{
     url: string;
     fileName: string;
   } | null>(null);
 
+  const currentExists = currentSchedule !== null;
+
   const loadSchedule = useCallback(async () => {
     setLoading(true);
     setError("");
+    setCurrentConflict(false);
 
     try {
       const {
@@ -86,9 +123,9 @@ export default function SchedulePage() {
 
       if (!user) {
         setIsAdmin(false);
-        setCurrentExists(false);
-        setCurrentUpdatedAt(null);
+        setCurrentSchedule(null);
         setArchives([]);
+        setPreview(null);
         return;
       }
 
@@ -105,39 +142,66 @@ export default function SchedulePage() {
 
       // Schedule documents are restricted to teaching administrators.
       if (!admin) {
-        setCurrentExists(false);
-        setCurrentUpdatedAt(null);
+        setCurrentSchedule(null);
         setArchives([]);
+        setPreview(null);
         return;
       }
 
       const { data: currentFiles, error: currentError } = await supabase.storage
         .from(BUCKET)
-        .list("schedule", {
+        .list(SCHEDULE_FOLDER, {
           limit: 100,
         });
 
       if (currentError) throw currentError;
 
-      const currentFile = (currentFiles ?? []).find(
-        (file) => file.name === "current-schedule.docx",
+      const currentCandidates = (currentFiles ?? []).filter(
+        (file) =>
+          isScheduleFileName(file.name) &&
+          file.name.startsWith("current-schedule."),
       );
 
-      setCurrentExists(Boolean(currentFile));
-      setCurrentUpdatedAt(currentFile?.updated_at ?? null);
+      // Do not silently choose one if both formats exist in the current folder.
+      if (currentCandidates.length > 1) {
+        setCurrentSchedule(null);
+        setPreview(null);
+        setCurrentConflict(true);
+        setError(
+          "Both current-schedule.docx and current-schedule.xlsx exist. Please resolve the duplicate current files in Supabase Storage before uploading or managing schedules.",
+        );
+      } else if (currentCandidates.length === 1) {
+        const file = currentCandidates[0];
+        const extension = getScheduleExtension(file.name);
 
-      if (currentFile) {
-        const { data: signedData, error: signedError } = await supabase.storage
-          .from(BUCKET)
-          .createSignedUrl(CURRENT_PATH, SIGNED_URL_SECONDS);
+        if (!extension) {
+          setCurrentSchedule(null);
+          setPreview(null);
+        } else {
+          const path = `${SCHEDULE_FOLDER}/${file.name}`;
+          const current: CurrentSchedule = {
+            name: file.name,
+            path,
+            updatedAt: file.updated_at ?? null,
+            extension,
+          };
 
-        if (signedError) throw signedError;
+          setCurrentSchedule(current);
 
-        setPreview({
-          url: signedData.signedUrl,
-          fileName: "current-schedule.docx",
-        });
+          const { data: signedData, error: signedError } =
+            await supabase.storage
+              .from(BUCKET)
+              .createSignedUrl(path, SIGNED_URL_SECONDS);
+
+          if (signedError) throw signedError;
+
+          setPreview({
+            url: signedData.signedUrl,
+            fileName: file.name,
+          });
+        }
       } else {
+        setCurrentSchedule(null);
         setPreview(null);
       }
 
@@ -154,7 +218,7 @@ export default function SchedulePage() {
         (archiveFiles ?? [])
           .filter(
             (file) =>
-              file.name.toLowerCase().endsWith(".docx") &&
+              isScheduleFileName(file.name) &&
               file.name !== ".emptyFolderPlaceholder",
           )
           .map((file) => ({
@@ -227,14 +291,41 @@ export default function SchedulePage() {
     }
   }
 
+  async function verifyAdminAccess() {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) throw userError;
+    if (!user) throw new Error("Please sign in again.");
+
+    const { data: adminRecord, error: adminError } = await supabase
+      .from("teaching_admins")
+      .select("user_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (adminError) throw adminError;
+
+    if (!adminRecord) {
+      setIsAdmin(false);
+      throw new Error("Your account is not authorized to manage schedules.");
+    }
+  }
+
   async function uploadSchedule() {
     if (!selectedFile) {
-      setError("Please select a Word document first.");
+      setError("Please select a Word document or Excel workbook first.");
       return;
     }
 
-    if (!selectedFile.name.toLowerCase().endsWith(".docx")) {
-      setError("Only .docx Word documents are supported.");
+    const newExtension = getScheduleExtension(selectedFile.name);
+
+    if (!newExtension) {
+      setError(
+        "Only .docx Word documents and .xlsx Excel workbooks are supported.",
+      );
       return;
     }
 
@@ -243,122 +334,134 @@ export default function SchedulePage() {
       return;
     }
 
+    if (currentConflict) {
+      setError(
+        "Resolve the duplicate current schedule files in Supabase Storage before uploading a replacement.",
+      );
+      return;
+    }
+
     setBusy(true);
     setError("");
     setNotice("");
 
-    let archiveCreated = false;
-    let archivePath = "";
+    let archivePath: string | null = null;
+    let newPath: string | null = null;
+    let newFileUploaded = false;
 
     try {
-      // Verify the current login and admin permission again before writing.
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+      await verifyAdminAccess();
 
-      if (userError) throw userError;
-      if (!user) throw new Error("Please sign in again.");
+      const oldCurrent = currentSchedule;
 
-      const { data: adminRecord, error: adminError } = await supabase
-        .from("teaching_admins")
-        .select("user_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (adminError) throw adminError;
-      if (!adminRecord) {
-        setIsAdmin(false);
-        throw new Error("Your account is not authorized to manage schedules.");
-      }
-
-      // If a current schedule exists, archive its contents first.
-      if (currentExists) {
+      // Preserve the current file before replacing or removing it.
+      if (oldCurrent) {
         const { data: oldFile, error: oldFileError } = await supabase.storage
           .from(BUCKET)
-          .download(CURRENT_PATH);
+          .download(oldCurrent.path);
 
         if (oldFileError) throw oldFileError;
 
-        archivePath = makeArchivePath();
+        archivePath = makeArchivePath(oldCurrent.extension);
 
         const { error: archiveError } = await supabase.storage
           .from(BUCKET)
           .upload(archivePath, oldFile, {
-            contentType: DOCX_MIME,
+            contentType: getScheduleMime(oldCurrent.extension),
             upsert: false,
           });
 
         if (archiveError) {
+          archivePath = null;
           throw new Error(
             `The previous schedule could not be archived. The current schedule was not replaced. ${archiveError.message}`,
           );
         }
-
-        archiveCreated = true;
       }
 
-      // Publish the replacement only after archiving succeeds.
+      newPath = getCurrentPath(newExtension);
+
+      // When switching formats, upload to the new path first. Keep the old
+      // current file until the new upload succeeds.
       const { error: uploadError } = await supabase.storage
         .from(BUCKET)
-        .upload(CURRENT_PATH, selectedFile, {
-          contentType: DOCX_MIME,
-          upsert: currentExists,
+        .upload(newPath, selectedFile, {
+          contentType: getScheduleMime(newExtension),
+          upsert: oldCurrent?.path === newPath,
         });
 
       if (uploadError) {
         throw new Error(
           `The new schedule could not be published. ${
-            archiveCreated
+            archivePath
               ? "The previous schedule remains preserved in the archive. "
               : ""
           }${uploadError.message}`,
         );
       }
 
-      // Refresh the list and automatically open the new document.
-      setSelectedFile(null);
+      newFileUploaded = true;
 
+      // If switching extensions, remove the previous current file only after
+      // the new file has been uploaded successfully. If removal fails, remove
+      // the new file to avoid leaving two current schedules.
+      if (oldCurrent && oldCurrent.path !== newPath) {
+        const { error: removeOldError } = await supabase.storage
+          .from(BUCKET)
+          .remove([oldCurrent.path]);
+
+        if (removeOldError) {
+          const { error: rollbackError } = await supabase.storage
+            .from(BUCKET)
+            .remove([newPath]);
+
+          newFileUploaded = false;
+
+          throw new Error(
+            `The new schedule was uploaded, but the previous current file could not be removed. ${
+              rollbackError
+                ? `Automatic cleanup of the new file also failed: ${rollbackError.message}. `
+                : "The new file was removed to avoid having two current schedules. "
+            }${removeOldError.message}`,
+          );
+        }
+      }
+
+      setSelectedFile(null);
       const input = document.getElementById(
         "schedule-upload",
       ) as HTMLInputElement | null;
-
       if (input) input.value = "";
 
+      setNotice("Schedule uploaded successfully.");
       await loadSchedule();
 
-      const newUrl = await createPreviewUrl(CURRENT_PATH);
-
+      // Recreate a fresh signed URL and open the new current schedule.
+      const refreshedPath = getCurrentPath(newExtension);
+      const newUrl = await createPreviewUrl(refreshedPath);
       setPreview({
         url: newUrl,
-        fileName: "current-schedule.docx",
+        fileName: `current-schedule.${newExtension}`,
       });
-
-      setNotice("Schedule uploaded successfully. Opening preview...");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Schedule upload failed.");
+
+      // If an upload was completed but a later step failed, do not delete the
+      // new file automatically here: the error message and archive preserve
+      // the information needed for safe recovery.
+      void newFileUploaded;
+      await loadSchedule();
     } finally {
       setBusy(false);
     }
   }
 
-  if (loading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="flex items-center gap-3 text-gray-600">
-          <LoaderCircle className="animate-spin" size={22} />
-          Checking schedule access...
-        </div>
-      </main>
-    );
-  }
-
   async function archiveCurrent() {
-    if (!isAdmin || busy || !currentExists) return;
+    if (!isAdmin || busy || !currentSchedule || currentConflict) return;
 
     if (
       !window.confirm(
-        "Archive the current schedule? It will be moved to the archive and removed from Current Schedule.",
+        "Archive the current schedule? It will be removed from Current Schedule after the archive succeeds.",
       )
     ) {
       return;
@@ -368,47 +471,31 @@ export default function SchedulePage() {
     setError("");
     setNotice("");
 
-    let archivePath = "";
-
     try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+      await verifyAdminAccess();
 
-      if (userError) throw userError;
-      if (!user) throw new Error("Please sign in again.");
-
-      const { data: adminRecord, error: adminError } = await supabase
-        .from("teaching_admins")
-        .select("user_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (adminError) throw adminError;
-      if (!adminRecord) throw new Error("Administrator access required.");
+      const current = currentSchedule;
 
       const { data: oldFile, error: downloadError } = await supabase.storage
         .from(BUCKET)
-        .download(CURRENT_PATH);
+        .download(current.path);
 
       if (downloadError) throw downloadError;
 
-      archivePath = makeArchivePath();
+      const archivePath = makeArchivePath(current.extension);
 
       const { error: archiveError } = await supabase.storage
         .from(BUCKET)
         .upload(archivePath, oldFile, {
-          contentType: DOCX_MIME,
+          contentType: getScheduleMime(current.extension),
           upsert: false,
         });
 
       if (archiveError) throw archiveError;
 
-      // Remove the current file only after the archive upload succeeds.
       const { error: removeError } = await supabase.storage
         .from(BUCKET)
-        .remove([CURRENT_PATH]);
+        .remove([current.path]);
 
       if (removeError) {
         throw new Error(
@@ -423,7 +510,6 @@ export default function SchedulePage() {
       setError(
         err instanceof Error ? err.message : "Unable to archive schedule.",
       );
-      // Refresh in case the archive succeeded but a later step failed.
       await loadSchedule();
     } finally {
       setBusy(false);
@@ -431,7 +517,7 @@ export default function SchedulePage() {
   }
 
   async function deleteCurrent() {
-    if (!isAdmin || busy || !currentExists) return;
+    if (!isAdmin || busy || !currentSchedule || currentConflict) return;
 
     if (
       !window.confirm(
@@ -446,26 +532,11 @@ export default function SchedulePage() {
     setNotice("");
 
     try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError) throw userError;
-      if (!user) throw new Error("Please sign in again.");
-
-      const { data: adminRecord, error: adminError } = await supabase
-        .from("teaching_admins")
-        .select("user_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (adminError) throw adminError;
-      if (!adminRecord) throw new Error("Administrator access required.");
+      await verifyAdminAccess();
 
       const { error: removeError } = await supabase.storage
         .from(BUCKET)
-        .remove([CURRENT_PATH]);
+        .remove([currentSchedule.path]);
 
       if (removeError) throw removeError;
 
@@ -497,22 +568,7 @@ export default function SchedulePage() {
     setNotice("");
 
     try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError) throw userError;
-      if (!user) throw new Error("Please sign in again.");
-
-      const { data: adminRecord, error: adminError } = await supabase
-        .from("teaching_admins")
-        .select("user_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (adminError) throw adminError;
-      if (!adminRecord) throw new Error("Administrator access required.");
+      await verifyAdminAccess();
 
       const { error: removeError } = await supabase.storage
         .from(BUCKET)
@@ -533,6 +589,17 @@ export default function SchedulePage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (loading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="flex items-center gap-3 text-gray-600">
+          <LoaderCircle className="animate-spin" size={22} />
+          Checking schedule access...
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -598,6 +665,7 @@ export default function SchedulePage() {
                 />
               </div>
             )}
+
             <section className="rounded-2xl border bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="flex items-start gap-3">
@@ -607,11 +675,16 @@ export default function SchedulePage() {
                   <div>
                     <h2 className="text-xl font-semibold">Current Schedule</h2>
                     <p className="mt-1 text-sm text-gray-500">
-                      Current official Word document
+                      Current official Word document or Excel workbook
                     </p>
-                    {currentUpdatedAt && (
+                    {currentSchedule?.updatedAt && (
                       <p className="mt-2 text-xs text-gray-500">
-                        Last updated: {formatDate(currentUpdatedAt)}
+                        Last updated: {formatDate(currentSchedule.updatedAt)}
+                      </p>
+                    )}
+                    {currentSchedule && (
+                      <p className="mt-2 break-all text-xs text-gray-500">
+                        File: {currentSchedule.name}
                       </p>
                     )}
                   </div>
@@ -624,12 +697,21 @@ export default function SchedulePage() {
                 )}
               </div>
 
-              {currentExists ? (
+              {currentConflict ? (
+                <p className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                  Two current schedule files were found. Please resolve this in
+                  Supabase Storage before previewing, replacing, archiving, or
+                  deleting the current schedule.
+                </p>
+              ) : currentSchedule ? (
                 <div className="mt-6 flex flex-wrap gap-3">
                   <button
                     type="button"
                     onClick={() =>
-                      void openPreview(CURRENT_PATH, "current-schedule.docx")
+                      void openPreview(
+                        currentSchedule.path,
+                        currentSchedule.name,
+                      )
                     }
                     className="rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-800"
                   >
@@ -639,14 +721,15 @@ export default function SchedulePage() {
                     type="button"
                     onClick={() =>
                       void downloadSchedule(
-                        CURRENT_PATH,
-                        "current-schedule.docx",
+                        currentSchedule.path,
+                        currentSchedule.name,
                       )
                     }
                     className="inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm hover:bg-gray-50"
                   >
                     <Download size={17} />
-                    Download Word
+                    Download{" "}
+                    {currentSchedule.extension === "xlsx" ? "Excel" : "Word"}
                   </button>
                 </div>
               ) : (
@@ -654,7 +737,8 @@ export default function SchedulePage() {
                   No current schedule has been uploaded yet.
                 </p>
               )}
-              {currentExists && (
+
+              {currentSchedule && !currentConflict && (
                 <div className="mt-4 flex flex-wrap gap-3">
                   <button
                     type="button"
@@ -665,7 +749,6 @@ export default function SchedulePage() {
                     <Archive size={17} />
                     {busy ? "Processing..." : "Archive Current"}
                   </button>
-
                   <button
                     type="button"
                     onClick={() => void deleteCurrent()}
@@ -676,33 +759,36 @@ export default function SchedulePage() {
                   </button>
                 </div>
               )}
+
               <div className="mt-7 border-t pt-6">
                 <h3 className="font-semibold">Upload New Schedule</h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  Upload a .docx file. The current version will be archived
-                  before it is replaced.
+                  Upload a .docx Word document or .xlsx Excel workbook. The
+                  current version will be archived before it is replaced.
                 </p>
 
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
                   <input
                     id="schedule-upload"
                     type="file"
-                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    accept=".docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     onChange={(event) =>
                       setSelectedFile(event.target.files?.[0] ?? null)
                     }
-                    disabled={busy}
+                    disabled={busy || currentConflict}
                     className="block w-full text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-gray-100 file:px-4 file:py-2.5 file:text-sm file:font-medium hover:file:bg-gray-200"
                   />
-
                   <button
                     type="button"
                     onClick={() => void uploadSchedule()}
-                    disabled={busy || !selectedFile}
+                    disabled={busy || !selectedFile || currentConflict}
                     className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {busy ? (
                       <LoaderCircle className="animate-spin" size={17} />
+                    ) : selectedFile &&
+                      getScheduleExtension(selectedFile.name) === "xlsx" ? (
+                      <FileSpreadsheet size={17} />
                     ) : (
                       <Upload size={17} />
                     )}
@@ -727,7 +813,7 @@ export default function SchedulePage() {
                   <div>
                     <h2 className="text-xl font-semibold">Schedule Archive</h2>
                     <p className="mt-1 text-sm text-gray-500">
-                      Previous schedule versions
+                      Previous Word and Excel schedule versions
                     </p>
                   </div>
                 </div>
@@ -756,10 +842,17 @@ export default function SchedulePage() {
                       className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center"
                     >
                       <div className="flex min-w-0 items-start gap-3">
-                        <FileText
-                          className="mt-1 shrink-0 text-gray-400"
-                          size={20}
-                        />
+                        {file.name.toLowerCase().endsWith(".xlsx") ? (
+                          <FileSpreadsheet
+                            className="mt-1 shrink-0 text-green-600"
+                            size={20}
+                          />
+                        ) : (
+                          <FileText
+                            className="mt-1 shrink-0 text-gray-400"
+                            size={20}
+                          />
+                        )}
                         <div className="min-w-0">
                           <p className="break-all font-medium">{file.name}</p>
                           <p className="mt-1 text-xs text-gray-500">
